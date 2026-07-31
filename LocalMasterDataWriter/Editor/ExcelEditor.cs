@@ -9,16 +9,16 @@ namespace LocalMasterDataWriter.Editor
     {
         public override void OnInspectorGUI()
         {
-            base.OnInspectorGUI();
-
             if (target is not Excel self)
             {
                 return;
             }
 
+            self.DrawSecurityKeys();
+
             EditorGUILayout.Space();
 
-            self.DrawSecurityKeys();
+            base.OnInspectorGUI();
 
             EditorGUILayout.Space();
 

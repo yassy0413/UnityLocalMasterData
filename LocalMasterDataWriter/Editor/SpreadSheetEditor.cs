@@ -14,6 +14,10 @@ namespace LocalMasterDataWriter.Editor
                 return;
             }
 
+            self.DrawSecurityKeys();
+
+            EditorGUILayout.Space();
+
             serializedObject.Update();
             DrawPropertiesExcluding(serializedObject, "m_Sheets");
             EditorGUILayout.Space();

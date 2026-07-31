@@ -254,3 +254,15 @@ HMAC 検証に失敗した場合は空の byte 配列が返るため、結果的
 - `Record` の property の追加、削除、型変更、順序変更後は `.bin` を再生成してください。
 - 空文字を数値、bool、DateTime に変換することはできません。
 - 暗号鍵を再生成した場合は、既存 `.bin` も再生成してください。
+
+## Installation with UPM
+
+You can install this package from Unity Package Manager using the Git URL:
+
+```text
+https://github.com/yassy0413/UnityLocalMasterData.git
+```
+
+![Package Manager Step 1](Editor/StoreDocument/PackageManager01.png)
+
+![Package Manager Step 2](Editor/StoreDocument/PackageManager02.png)

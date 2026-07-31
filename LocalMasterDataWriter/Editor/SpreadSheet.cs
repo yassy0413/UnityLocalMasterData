@@ -27,6 +27,7 @@ namespace LocalMasterDataWriter.Editor
             public string Gid = string.Empty;
         }
 
+        [Header("")]
         [SerializeField]
         private string m_ApiUrl = string.Empty;
 

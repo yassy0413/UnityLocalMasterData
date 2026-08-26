@@ -40,8 +40,16 @@ namespace LocalMasterDataWriter.Editor
         private void DrawSheets(SpreadSheet self)
         {
             var sheets = serializedObject.FindProperty("m_Sheets");
+            if (sheets == null)
+            {
+                EditorGUILayout.HelpBox("m_Sheets was not found.", MessageType.Error);
+                return;
+            }
 
-            EditorGUILayout.PropertyField(sheets, includeChildren: false);
+            sheets.isExpanded = EditorGUILayout.Foldout(
+                sheets.isExpanded,
+                sheets.displayName,
+                true);
 
             if (sheets.isExpanded)
             {

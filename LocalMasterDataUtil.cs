@@ -43,8 +43,9 @@ namespace LocalMasterData
             return Expression.Lambda<Action<object, object?>>(body, instance, value).Compile();
         }
 
-        private static ReadValueDelegate CreateReadValue(PropertyInfo property) =>
-            Type.GetTypeCode(property.PropertyType) switch
+        private static ReadValueDelegate CreateReadValue(PropertyInfo property)
+        {
+            return Type.GetTypeCode(property.PropertyType) switch
             {
                 TypeCode.Int16 => static bs => bs.ReadInt16(),
                 TypeCode.Int32 => static bs => bs.ReadInt32(),
@@ -56,7 +57,11 @@ namespace LocalMasterData
                 TypeCode.Double => static bs => bs.ReadDouble(),
                 TypeCode.Boolean => static bs => bs.ReadBoolean(),
                 TypeCode.DateTime => static bs => DateTime.FromBinary(bs.ReadInt64()),
-                _ => static bs => bs.ReadString(),
+                TypeCode.String => static bs => bs.ReadString(),
+                _ => LocalMasterDataResolver.TryResolve(property.PropertyType, out var codec)
+                    ? reader => codec.Read(reader)
+                    : static bs => bs.ReadString(),
             };
+        }
     }
 }

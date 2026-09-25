@@ -44,8 +44,6 @@ namespace LocalMasterData
             }
         }
 
-        public abstract string GetSheetName();
-
         public abstract TKey GetKey(TRecord record);
 
         public List<TRecord> Records { get; } = new();
@@ -66,7 +64,21 @@ namespace LocalMasterData
         {
             var type = typeof(TRecord);
             var props = type.GetProperties()
-                .Select(x => (value: x, typecode: Type.GetTypeCode(x.PropertyType)))
+                .Select(static x =>
+                {
+                    var typecode = Type.GetTypeCode(x.PropertyType);
+                    var codec = typecode switch
+                    {
+                        TypeCode.Int16 or TypeCode.Int32 or TypeCode.Int64 or
+                        TypeCode.UInt16 or TypeCode.UInt32 or TypeCode.UInt64 or
+                        TypeCode.Single or TypeCode.Double or TypeCode.Boolean or
+                        TypeCode.DateTime or TypeCode.String => null,
+                        _ => LocalMasterDataResolver.TryResolve(x.PropertyType, out var registeredCodec)
+                            ? registeredCodec
+                            : null,
+                    };
+                    return (value: x, typecode, codec);
+                })
                 .ToArray();
 
             using var ms = new MemoryStream();
@@ -85,49 +97,78 @@ namespace LocalMasterData
                         switch (prop.typecode)
                         {
                             case TypeCode.Int16:
-                                bs.Write(short.Parse(value, CultureInfo.InvariantCulture));
+                                bs.Write(string.IsNullOrEmpty(value)
+                                    ? 0
+                                    : short.Parse(value, CultureInfo.InvariantCulture));
                                 break;
 
                             case TypeCode.Int32:
-                                bs.Write(int.Parse(value, CultureInfo.InvariantCulture));
+                                bs.Write(string.IsNullOrEmpty(value)
+                                    ? 0
+                                    : int.Parse(value, CultureInfo.InvariantCulture));
                                 break;
 
                             case TypeCode.Int64:
-                                bs.Write(long.Parse(value, CultureInfo.InvariantCulture));
+                                bs.Write(string.IsNullOrEmpty(value)
+                                    ? 0
+                                    : long.Parse(value, CultureInfo.InvariantCulture));
                                 break;
 
                             case TypeCode.UInt16:
-                                bs.Write(ushort.Parse(value, CultureInfo.InvariantCulture));
+                                bs.Write(string.IsNullOrEmpty(value)
+                                    ? 0
+                                    : ushort.Parse(value, CultureInfo.InvariantCulture));
                                 break;
 
                             case TypeCode.UInt32:
-                                bs.Write(uint.Parse(value, CultureInfo.InvariantCulture));
+                                bs.Write(string.IsNullOrEmpty(value)
+                                    ? 0
+                                    : uint.Parse(value, CultureInfo.InvariantCulture));
                                 break;
 
                             case TypeCode.UInt64:
-                                bs.Write(ulong.Parse(value, CultureInfo.InvariantCulture));
+                                bs.Write(string.IsNullOrEmpty(value)
+                                    ? 0
+                                    : ulong.Parse(value, CultureInfo.InvariantCulture));
                                 break;
 
                             case TypeCode.Single:
-                                bs.Write(float.Parse(value, CultureInfo.InvariantCulture));
+                                bs.Write(string.IsNullOrEmpty(value)
+                                    ? 0
+                                    : float.Parse(value, CultureInfo.InvariantCulture));
                                 break;
 
                             case TypeCode.Double:
-                                bs.Write(double.Parse(value, CultureInfo.InvariantCulture));
+                                bs.Write(string.IsNullOrEmpty(value)
+                                    ? 0
+                                    : double.Parse(value, CultureInfo.InvariantCulture));
                                 break;
 
                             case TypeCode.Boolean:
-                                bs.Write(bool.Parse(value));
+                                bs.Write(!string.IsNullOrEmpty(value) && bool.Parse(value));
                                 break;
 
                             case TypeCode.DateTime:
-                                bs.Write(DateTime
-                                    .Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
-                                    .ToBinary());
+                                bs.Write(string.IsNullOrEmpty(value)
+                                    ? 0L
+                                    : DateTime
+                                        .Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
+                                        .ToBinary());
+                                break;
+
+                            case TypeCode.String:
+                                bs.Write(value);
                                 break;
 
                             default:
-                                bs.Write(value);
+                                if (prop.codec != null)
+                                {
+                                    prop.codec.Write(bs, value);
+                                }
+                                else
+                                {
+                                    bs.Write(value);
+                                }
                                 break;
                         }
                     }

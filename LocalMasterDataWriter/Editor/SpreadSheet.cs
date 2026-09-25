@@ -49,6 +49,7 @@ namespace LocalMasterDataWriter.Editor
 
         public void Build()
         {
+            RegenerateSecurityKeys(true);
             BuildFor(m_Sheets);
         }
 
@@ -59,9 +60,9 @@ namespace LocalMasterDataWriter.Editor
             var tables = LocalMasterDataReader.CreateTables();
             var outputFolderPath = AssetDatabase.GetAssetPath(OutputFolder);
 
-            var aesId = Convert.FromBase64String(AesId);
             var aesKey = Convert.FromBase64String(AesKey);
             var hmacSecretKey = Convert.FromBase64String(HmacSecretKey);
+            var signingPrivateKey = Convert.FromBase64String(SigningPrivateKeyParameters);
 
             Parallel.ForEach(
                 sheets,
@@ -78,9 +79,17 @@ namespace LocalMasterDataWriter.Editor
                     byte[] csvData;
                     using (var request = new HttpRequestMessage(HttpMethod.Get, url))
                     {
-                        using var response = GetResult(HttpClient.SendAsync(request));
-                        response.EnsureSuccessStatusCode();
-                        csvData = GetResult(response.Content.ReadAsByteArrayAsync());
+                        try
+                        {
+                            using var response = GetResult(HttpClient.SendAsync(request));
+                            response.EnsureSuccessStatusCode();
+                            csvData = GetResult(response.Content.ReadAsByteArrayAsync());
+                        }
+                        catch (Exception e)
+                        {
+                            Debug.LogError($"{sheet.Name}\n{e}");
+                            return;
+                        }
                     }
 
                     var csvRows = ParseCsv(csvData);
@@ -103,13 +112,17 @@ namespace LocalMasterDataWriter.Editor
                         .ToList();
 
                     var bytes = table.instance.CreateBinary(records);
-                    bytes = LocalMasterDataCompressor.CompressAndEncrypt(bytes, aesId, aesKey, hmacSecretKey);
+                    bytes = LocalMasterDataCompressor.CompressEncryptAndSign(
+                        bytes,
+                        aesKey,
+                        hmacSecretKey,
+                        signingPrivateKey,
+                        UseRsaSignature);
                     File.WriteAllBytes(Path.Combine(outputFolderPath, $"{sheet.Name}.bin"), bytes);
                 }
             );
 
-            WriteManifestFile(outputFolderPath, tables.Select(static x => x.Key));
-            WriteScriptFile();
+            WriteScriptFile(outputFolderPath);
 
             AssetDatabase.Refresh();
             Debug.Log("LocalMasterDataWriter.SpreadSheet build finished.");

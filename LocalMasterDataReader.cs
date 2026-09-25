@@ -3,9 +3,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
 using UnityEngine;
@@ -17,11 +15,13 @@ namespace LocalMasterData
     [PublicAPI]
     public sealed class LocalMasterDataReader : IDisposable
     {
-        public const string ManifestFilename = "lmd-enum";
-
         private static readonly IReadOnlyDictionary<Type, ILocalMasterDataTable> EmptyTables =
             new ReadOnlyDictionary<Type, ILocalMasterDataTable>(new Dictionary<Type, ILocalMasterDataTable>());
 
+        private static readonly Dictionary<string, Func<IReadOnlyList<LocalMasterDataTableRegistration>>>
+            TableFactories = new();
+
+        private static readonly object TableFactorySyncRoot = new();
         private static LocalMasterDataReader? ms_Instance;
         private readonly object m_SyncRoot = new();
 
@@ -56,7 +56,12 @@ namespace LocalMasterData
             Debug.Log("LocalMasterDataReader disposed.");
         }
 
-        public async Task BuildAsync(byte[] aesIv, byte[] aesKey, byte[] hmacSecretKey)
+        public async Task BuildAsync(
+            byte[] aesKey,
+            byte[] hmacSecretKey,
+            byte[] signingPublicKeyModulus,
+            byte[] signingPublicKeyExponent,
+            string streamingAssetsDirectory)
         {
             lock (m_SyncRoot)
             {
@@ -70,7 +75,12 @@ namespace LocalMasterData
 
             try
             {
-                var builtTables = await BuildTablesAsync(aesIv, aesKey, hmacSecretKey);
+                var builtTables = await BuildTablesAsync(
+                    aesKey,
+                    hmacSecretKey,
+                    signingPublicKeyModulus,
+                    signingPublicKeyExponent,
+                    streamingAssetsDirectory);
 
                 foreach (var table in Tables.Values)
                 {
@@ -98,36 +108,36 @@ namespace LocalMasterData
         }
 
         private static async Task<Dictionary<Type, ILocalMasterDataTable>> BuildTablesAsync(
-            byte[] aesIv, byte[] aesKey, byte[] hmacSecretKey)
+            byte[] aesKey,
+            byte[] hmacSecretKey,
+            byte[] signingPublicKeyModulus,
+            byte[] signingPublicKeyExponent,
+            string streamingAssetsDirectory)
         {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             var sw = Stopwatch.StartNew();
 #endif
             var tables = CreateTables();
-
-            var manifestAsset = Resources.Load<TextAsset>(ManifestFilename);
-            if (manifestAsset == null)
+            if (string.IsNullOrWhiteSpace(streamingAssetsDirectory))
             {
-                throw new FileNotFoundException();
+                throw new ArgumentException(
+                    "StreamingAssets directory must not be empty.",
+                    nameof(streamingAssetsDirectory));
             }
 
-            var manifest = manifestAsset.text.Split(',');
-            Resources.UnloadAsset(manifestAsset);
+            var rootPath = $"{Application.streamingAssetsPath}/{streamingAssetsDirectory.Trim('/')}";
 
-            var rootPath = $"{Application.streamingAssetsPath}/{manifest[0]}";
-
-            ValidateBinaryFiles(tables, manifest[1..]);
-
-            await Task.WhenAll(manifest[1..].Select(async x =>
+            await Task.WhenAll(tables.Select(async pair =>
             {
+                var sheetName = pair.Key;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 var sw2 = Stopwatch.StartNew();
 #endif
 
 #if UNITY_ANDROID && !UNITY_EDITOR
-                var url = $"{rootPath}/{x}.bin";
+                var url = $"{rootPath}/{sheetName}.bin";
 #else
-                var url = $"file://{rootPath}/{x}.bin";
+                var url = $"file://{rootPath}/{sheetName}.bin";
 #endif
 
                 byte[] bytes;
@@ -137,7 +147,8 @@ namespace LocalMasterData
 
                     if (request.result != UnityWebRequest.Result.Success)
                     {
-                        throw new Exception($"LocalMasterDataReader load failed. url[{url}] error[{request.error}]");
+                        Debug.LogWarning($"LocalMasterDataReader load failed. url[{url}] error[{request.error}]");
+                        return;
                     }
 
                     bytes = request.downloadHandler.data;
@@ -145,12 +156,17 @@ namespace LocalMasterData
 
                 await Task.Run(() =>
                 {
-                    bytes = LocalMasterDataCompressor.DecompressAndDecrypt(bytes, aesIv, aesKey, hmacSecretKey);
-                    tables[x].instance.ReadBinary(bytes);
+                    bytes = LocalMasterDataCompressor.DecryptVerifyAndDecompress(
+                        bytes,
+                        aesKey,
+                        hmacSecretKey,
+                        signingPublicKeyModulus,
+                        signingPublicKeyExponent);
+                    pair.Value.instance.ReadBinary(bytes);
                 });
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.Log($"Read [{x}] {sw2.Elapsed.TotalSeconds}sec");
+                Debug.Log($"Read [{sheetName}] {sw2.Elapsed.TotalSeconds}sec");
 #endif
             }));
 
@@ -165,64 +181,53 @@ namespace LocalMasterData
             return result;
         }
 
-        [Conditional("UNITY_EDITOR")]
-        private static void ValidateBinaryFiles(
-            IReadOnlyDictionary<string, (Type type, ILocalMasterDataTable instance)> tables,
-            IReadOnlyCollection<string> keys)
+        public static void RegisterTableFactory(
+            string assemblyName,
+            Func<IReadOnlyList<LocalMasterDataTableRegistration>> factory)
         {
-            var fileNames = keys
-                .Where(static x => !string.IsNullOrEmpty(x))
-                .Select(static x => x!)
-                .ToHashSet();
-
-            var missingFiles = tables.Keys
-                .Where(x => !fileNames.Contains(x))
-                .OrderBy(static x => x)
-                .ToArray();
-
-            var unknownFiles = fileNames
-                .Where(x => !tables.ContainsKey(x))
-                .OrderBy(static x => x)
-                .ToArray();
-
-            if (missingFiles.Length == 0 && unknownFiles.Length == 0)
+            if (string.IsNullOrWhiteSpace(assemblyName))
             {
-                return;
+                throw new ArgumentException("Assembly name must not be empty.", nameof(assemblyName));
             }
 
-            throw new InvalidDataException(
-                "Local master data files do not match table definitions."
-                + FormatValidationDetails("Missing files", missingFiles)
-                + FormatValidationDetails("Unknown files", unknownFiles));
-        }
+            if (factory == null)
+            {
+                throw new ArgumentNullException(nameof(factory));
+            }
 
-        private static string FormatValidationDetails(string label, IReadOnlyCollection<string> values)
-        {
-            return values.Count == 0
-                ? string.Empty
-                : $" {label}: [{string.Join(", ", values)}].";
+            lock (TableFactorySyncRoot)
+            {
+                TableFactories[assemblyName] = factory;
+            }
         }
-
-        private static readonly Type LocalMasterDataTableType = typeof(ILocalMasterDataTable);
 
         public static IReadOnlyDictionary<string, (Type type, ILocalMasterDataTable instance)> CreateTables()
         {
-            return Assembly.Load("Assembly-CSharp").GetTypes()
-                .AsParallel()
-                .Where(static x => !x.IsAbstract)
-                .Where(static x => LocalMasterDataTableType.IsAssignableFrom(x))
-                .Select(static x => (x, instance: CreateInstance(x)))
-                .ToDictionary(static x => x.instance.GetSheetName());
-        }
-
-        private static ILocalMasterDataTable CreateInstance(Type type)
-        {
-            if (Activator.CreateInstance(type) is ILocalMasterDataTable instance)
+            Func<IReadOnlyList<LocalMasterDataTableRegistration>>[] factories;
+            lock (TableFactorySyncRoot)
             {
-                return instance;
+                factories = TableFactories.Values.ToArray();
             }
 
-            throw new Exception($"Can not create instance of {type.FullName}.");
+            if (factories.Length == 0)
+            {
+                throw new InvalidOperationException(
+                    "No local master data table was registered. " +
+                    "Make sure the LocalMasterData Source Generator is installed and tables have " +
+                    "LocalMasterDataAttribute.");
+            }
+
+            var result = new Dictionary<string, (Type type, ILocalMasterDataTable instance)>();
+            foreach (var registration in factories.SelectMany(static x => x()))
+            {
+                if (!result.TryAdd(registration.SheetName, (registration.Type, registration.Instance)))
+                {
+                    throw new InvalidOperationException(
+                        $"Duplicate local master data sheet name: {registration.SheetName}");
+                }
+            }
+
+            return new ReadOnlyDictionary<string, (Type type, ILocalMasterDataTable instance)>(result);
         }
     }
 }

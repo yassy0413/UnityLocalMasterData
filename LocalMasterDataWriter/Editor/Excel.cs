@@ -41,9 +41,9 @@ namespace LocalMasterDataWriter.Editor
             var inputFolderPath = AssetDatabase.GetAssetPath(InputFolder);
             var outputFolderPath = AssetDatabase.GetAssetPath(OutputFolder);
 
-            var aesId = Convert.FromBase64String(AesId);
             var aesKey = Convert.FromBase64String(AesKey);
             var hmacSecretKey = Convert.FromBase64String(HmacSecretKey);
+            var signingPrivateKey = Convert.FromBase64String(SigningPrivateKeyParameters);
 
             Parallel.ForEach(
                 Directory.GetFiles(inputFolderPath, "*.xlsx", SearchOption.AllDirectories)
@@ -58,12 +58,16 @@ namespace LocalMasterDataWriter.Editor
                     }
 
                     var bytes = table.instance.CreateBinary(excelTable.Value);
-                    bytes = LocalMasterDataCompressor.CompressAndEncrypt(bytes, aesId, aesKey, hmacSecretKey);
+                    bytes = LocalMasterDataCompressor.CompressEncryptAndSign(
+                        bytes,
+                        aesKey,
+                        hmacSecretKey,
+                        signingPrivateKey,
+                        UseRsaSignature);
                     File.WriteAllBytes(Path.Combine(outputFolderPath, $"{excelTable.Key}.bin"), bytes);
                 });
 
-            WriteManifestFile(outputFolderPath, tables.Select(static x => x.Key));
-            WriteScriptFile();
+            WriteScriptFile(outputFolderPath);
 
             AssetDatabase.Refresh();
             Debug.Log("LocalMasterDataWriter.Excel build finished.");

@@ -134,7 +134,7 @@ namespace LocalMasterData
                 var sw2 = Stopwatch.StartNew();
 #endif
 
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if (UNITY_ANDROID || UNITY_WEBGL) && !UNITY_EDITOR
                 var url = $"{rootPath}/{sheetName}.bin";
 #else
                 var url = $"file://{rootPath}/{sheetName}.bin";
@@ -154,7 +154,7 @@ namespace LocalMasterData
                     bytes = request.downloadHandler.data;
                 }
 
-                await Task.Run(() =>
+                void Decode()
                 {
                     bytes = LocalMasterDataCompressor.DecryptVerifyAndDecompress(
                         bytes,
@@ -163,10 +163,17 @@ namespace LocalMasterData
                         signingPublicKeyModulus,
                         signingPublicKeyExponent);
                     pair.Value.instance.ReadBinary(bytes);
-                });
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.Log($"Read [{sheetName}] {sw2.Elapsed.TotalSeconds}sec");
+                    Debug.Log($"Read [{sheetName}] {sw2.Elapsed.TotalSeconds}sec");
+#endif
+                }
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+                // Web builds do not support C# worker threads.
+                Decode();
+#else
+                await Task.Run(Decode);
 #endif
             }));
 

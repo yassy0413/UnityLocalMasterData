@@ -158,10 +158,13 @@ Writer アセットでは以下を設定します。
 1. `.xlsx` ファイルを `InputFolder` 配下に置く
 2. シート名を `[LocalMasterData]` の名前と一致させる
 3. 1 行目に `Record` の property 名を入れる
-4. Excel Writer アセットの `Build` を押す
+4. Excel Writer アセットの `Build All` を押す
 
 ビルド時に、`InputFolder` 配下のすべての `.xlsx` が再帰的に読み込まれます。
 各シートはシート名をキーにテーブルクラスへ対応付けられ、対応するクラスがないシートは warning のみ出して無視されます。
+
+単体ビルドは Inspector の `Table` で対象を選び、`Build Selected Table` を押します。
+コードからは `Excel.BuildTable("Item")` を呼べます。対象シートの `.bin` だけを更新します。
 
 ## SpreadSheet からビルドする
 
@@ -189,6 +192,10 @@ SpreadSheet Writer アセットで以下を設定します。
 
 Inspector では `Build All` で全シートをビルドできます。
 各シート行の `Build` ボタンで 1 シートだけビルドすることもできます。
+
+Excel・SpreadSheet ともに、単体ビルドでは既存の AES 鍵・HMAC secret・RSA 署名鍵を維持し、
+`LocalMasterDataConst.cs` も更新しません。最初に全体ビルドを実行してください。
+鍵を手動で再生成した後も、全体ビルドが必要です。
 
 ## 生成されるファイル
 

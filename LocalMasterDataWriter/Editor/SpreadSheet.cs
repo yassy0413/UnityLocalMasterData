@@ -44,16 +44,16 @@ namespace LocalMasterDataWriter.Editor
 
         public void BuildAt(int index)
         {
-            BuildFor(new[] { m_Sheets[index] });
+            BuildFor(new[] { m_Sheets[index] }, false);
         }
 
         public void Build()
         {
             RegenerateSecurityKeys(true);
-            BuildFor(m_Sheets);
+            BuildFor(m_Sheets, true);
         }
 
-        private void BuildFor(Sheet[] sheets)
+        private void BuildFor(Sheet[] sheets, bool writeScript)
         {
             AssetDatabase.Refresh();
 
@@ -122,7 +122,10 @@ namespace LocalMasterDataWriter.Editor
                 }
             );
 
-            WriteScriptFile(outputFolderPath);
+            if (writeScript)
+            {
+                WriteScriptFile(outputFolderPath);
+            }
 
             AssetDatabase.Refresh();
             Debug.Log("LocalMasterDataWriter.SpreadSheet build finished.");

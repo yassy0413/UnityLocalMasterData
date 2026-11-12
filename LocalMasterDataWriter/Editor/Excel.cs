@@ -35,6 +35,21 @@ namespace LocalMasterDataWriter.Editor
 
         public void Build()
         {
+            BuildFor(null);
+        }
+
+        public void BuildTable(string tableName)
+        {
+            if (string.IsNullOrWhiteSpace(tableName))
+            {
+                throw new ArgumentException("Table name must not be empty.", nameof(tableName));
+            }
+
+            BuildFor(tableName);
+        }
+
+        private void BuildFor(string? tableName)
+        {
             AssetDatabase.Refresh();
 
             var tables = LocalMasterDataReader.CreateTables();
@@ -45,10 +60,17 @@ namespace LocalMasterDataWriter.Editor
             var hmacSecretKey = Convert.FromBase64String(HmacSecretKey);
             var signingPrivateKey = Convert.FromBase64String(SigningPrivateKeyParameters);
 
+            var excelTables = Directory.GetFiles(inputFolderPath, "*.xlsx", SearchOption.AllDirectories)
+                .SelectMany(path => GetTablesFromExcel(path, tableName))
+                .ToDictionary(static x => x.Key, static x => x.Value);
+
+            if (tableName != null && (!tables.ContainsKey(tableName) || !excelTables.ContainsKey(tableName)))
+            {
+                throw new InvalidOperationException($"Registered table or Excel sheet [{tableName}] was not found.");
+            }
+
             Parallel.ForEach(
-                Directory.GetFiles(inputFolderPath, "*.xlsx", SearchOption.AllDirectories)
-                    .SelectMany(GetTablesFromExcel)
-                    .ToDictionary(static x => x.Key, static x => x.Value),
+                excelTables,
                 excelTable =>
                 {
                     if (!tables.TryGetValue(excelTable.Key, out var table))
@@ -67,15 +89,19 @@ namespace LocalMasterDataWriter.Editor
                     File.WriteAllBytes(Path.Combine(outputFolderPath, $"{excelTable.Key}.bin"), bytes);
                 });
 
-            WriteScriptFile(outputFolderPath);
+            if (tableName == null)
+            {
+                WriteScriptFile(outputFolderPath);
+            }
 
             AssetDatabase.Refresh();
             Debug.Log("LocalMasterDataWriter.Excel build finished.");
         }
 
-        private static Dictionary<string, List<Dictionary<string, string>>> GetTablesFromExcel(string path)
+        private static Dictionary<string, List<Dictionary<string, string>>> GetTablesFromExcel(string path, string? tableName)
         {
             return GetSheetsFromExcel(path)
+                .Where(sheet => tableName == null || sheet.TableName == tableName)
                 .AsParallel()
                 .Select(static sheet =>
                 {

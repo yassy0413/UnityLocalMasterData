@@ -24,6 +24,19 @@ namespace LocalMasterData
             }
         }
 
+        private static class TypedReader<T>
+        {
+            internal static Func<BinaryReader, T>? Read;
+        }
+
+        public static Func<BinaryReader, T> GetReader<T>()
+        {
+            lock (SyncRoot)
+            {
+                return TypedReader<T>.Read ?? throw new InvalidOperationException($"No resolver registered for {typeof(T)}.");
+            }
+        }
+
         public static void Register<T>(
             Func<string, T> parse,
             Action<BinaryWriter, T> write,
@@ -51,6 +64,7 @@ namespace LocalMasterData
             lock (SyncRoot)
             {
                 Codecs[typeof(T)] = codec;
+                TypedReader<T>.Read = read;
             }
         }
 

@@ -1,0 +1,6 @@
+!SourceGenerator/Source~/
+!SourceGenerator/Source~/**
+!Tests~/
+!Tests~/**
+**/obj/
+**/bin/

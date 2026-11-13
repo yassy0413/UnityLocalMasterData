@@ -17,6 +17,14 @@ namespace LocalMasterData
         where TTable : class
     {
         private static TTable? ms_Instance;
+        private static string[]? ms_PropertyNames;
+        private static Func<Func<BinaryReader, TRecord>>? ms_ReaderFactory;
+
+        public static void RegisterGeneratedReader(string[] propertyNames, Func<Func<BinaryReader, TRecord>> readerFactory)
+        {
+            ms_PropertyNames = propertyNames;
+            ms_ReaderFactory = readerFactory;
+        }
 
         public static TTable Instance
         {
@@ -63,7 +71,8 @@ namespace LocalMasterData
         public byte[] CreateBinary(List<Dictionary<string, string>> records)
         {
             var type = typeof(TRecord);
-            var props = type.GetProperties()
+            var names = ms_PropertyNames ?? throw new InvalidOperationException("Generated reader is not registered. Update the Source Generator and recompile.");
+            var props = names.Select(name => type.GetProperty(name) ?? throw new InvalidOperationException($"Missing property: {name}"))
                 .Select(static x =>
                 {
                     var typecode = Type.GetTypeCode(x.PropertyType);
@@ -98,7 +107,7 @@ namespace LocalMasterData
                         {
                             case TypeCode.Int16:
                                 bs.Write(string.IsNullOrEmpty(value)
-                                    ? 0
+                                    ? (short)0
                                     : short.Parse(value, CultureInfo.InvariantCulture));
                                 break;
 
@@ -116,7 +125,7 @@ namespace LocalMasterData
 
                             case TypeCode.UInt16:
                                 bs.Write(string.IsNullOrEmpty(value)
-                                    ? 0
+                                    ? (ushort)0
                                     : ushort.Parse(value, CultureInfo.InvariantCulture));
                                 break;
 
@@ -191,16 +200,12 @@ namespace LocalMasterData
             Records.Capacity = numRecords;
             IdMap.EnsureCapacity(numRecords);
 
-            var propertyReaders = LocalMasterDataUtil.CreatePropertyReaders<TRecord>();
+            var readRecord = (ms_ReaderFactory ?? throw new InvalidOperationException(
+                "Generated reader is not registered. Update the Source Generator and recompile."))();
 
             for (var index = 0; index < numRecords; ++index)
             {
-                var instance = new TRecord();
-
-                foreach (var reader in propertyReaders)
-                {
-                    reader.Setter(instance, reader.ReadValue(bs));
-                }
+                var instance = readRecord(bs);
 
                 Records.Add(instance);
                 IdMap.Add(GetKey(instance), instance);

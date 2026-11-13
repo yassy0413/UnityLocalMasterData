@@ -53,7 +53,8 @@ public sealed class ItemMasterTable :
 - シート 1 行目のヘッダー名と `Record` の property 名を完全一致させてください。
 - `[LocalMasterData("Item")]` の名前は Excel のシート名、または SpreadSheet Writer の `Name` と一致させてください。
 - `GetKey(record)` は `IdMap` に登録するキーを返してください。キー重複があると読み込み時に例外になります。
-- Source Generator が属性付きテーブルをコンパイル時に登録します。実行時の型探索や `Activator.CreateInstance` は行いません。
+- Source Generator が属性付きテーブルの登録と Record の型付き reader を生成します。読み込み時のリフレクション、`Expression.Compile()`、基本型の boxing は行いません。
+- Record のプロパティには public getter / setter が必要です。static、indexer、init-only setter は使用できず、`LMD004` エラーになります。
 - `ILocalMasterDataTable` は異なる型のテーブルを Reader が一括して読み込み、破棄するための共通契約として使用します。
 - テーブルは非 abstract・非 generic で、引数なしコンストラクターから生成できる必要があります。シート名の重複などはコンパイルエラーになります。
 
@@ -73,7 +74,7 @@ public sealed class ItemMasterTable :
 - `DateTime`
 - `string`
 
-独自型を使用する場合は、以下の `LocalMasterDataResolver` に変換処理を登録してください。未登録の未対応型は Writer 側で文字列として書き出され、Reader 側で property 型へ代入できず失敗します。
+独自型を使用する場合は、以下の `LocalMasterDataResolver` に変換処理を登録してください。未登録の独自型は reader 作成時に明示的な例外になります。
 
 数値は `InvariantCulture` で parse されます。小数は `1.5` のように `.` 区切りで入力してください。
 `bool` は `true` / `false`、`DateTime` は `DateTime.Parse(..., InvariantCulture, DateTimeStyles.RoundtripKind)` で解釈できる文字列を入力してください。
@@ -277,7 +278,7 @@ Readerはヘッダーの署名長が0なら署名なしとして読み込みま�
 
 Writer は各テーブルを以下の順で処理します。
 
-1. `Record` の public property 一覧を取得
+1. Generator が決めた共通の列順で `Record` の public property 一覧を取得
 2. 1 行目ヘッダーを property 名に対応付け
 3. レコード数を書き込み
 4. 各レコードの property 値を型ごとにバイナリ書き込み
@@ -309,3 +310,21 @@ https://github.com/yassy0413/UnityLocalMasterData.git
 ![Package Manager Step 1](Editor/StoreDocument/PackageManager01.png)
 
 ![Package Manager Step 2](Editor/StoreDocument/PackageManager02.png)
+
+## Generated reader（1.0.2）
+
+Generator は直接 `new Record { Id = reader.ReadInt32(), ... }` を生成します。
+Unity のビルド時に通常のコード参照として解析されるため、この読み込み経路の Record setter を保持するための `link.xml` は不要です。
+独自型は `LocalMasterDataResolver.GetReader<T>()` をロードごとに取得して使用します。登録はテーブルのロード前に行ってください。
+`ILocalMasterDataTable` を直接実装する独自テーブルのシリアライズ処理は、その実装側で管理してください。
+
+**このバージョンへ更新した後は、必ず全 Writer で Build All を実行して .bin を再生成してください。**
+書き込みと読み込みが Generator の列順を共有するようになりました。旧バイナリには列情報がないため、旧形式との互換性は保証しません。
+また、short / ushort の書き込みが従来4バイトになっていた不一致を2バイトへ修正しています。
+
+Generator のソースは `SourceGenerator/Source~` に同梱しています（Unity のコンパイル対象外）。
+AI を使用せず、通常の Unity コンパイルで reader が生成されます。
+Generator 自体の変更後は `bash SourceGenerator/Source~/build.sh` で DLL を更新してください。
+テストは .NET 10 SDK で `dotnet run --project Tests~/ReaderTests.csproj -c Release` を実行します。
+
+ロード後の GetRecord は従来どおり Dictionary を参照します。IL2CPP 実機での速度改善率は未計測です。
